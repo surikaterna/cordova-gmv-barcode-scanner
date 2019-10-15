@@ -1,23 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/topLayout"
-    android:orientation="vertical"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:keepScreenOn="true">
-
-  <com.dealrinc.gmvScanner.ui.camera.CameraSourcePreview
-      android:id="@+id/preview"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent" >
+  <LinearLayout
+      xmlns:android="http://schemas.android.com/apk/res/android"
+      android:id="@+id/topLayout"
+      android:orientation="vertical"
       android:layout_width="match_parent"
-      android:layout_height="match_parent">
+      android:layout_height="match_parent"
+      android:keepScreenOn="true">
 
-    <com.dealrinc.gmvScanner.ui.camera.GraphicOverlay
-        android:id="@+id/graphicOverlay"
+    <com.dealrinc.gmvScanner.ui.camera.CameraSourcePreview
+        android:id="@+id/preview"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent">
 
-  </com.dealrinc.gmvScanner.ui.camera.CameraSourcePreview>
+      <com.dealrinc.gmvScanner.ui.camera.GraphicOverlay
+          android:id="@+id/graphicOverlay"
+          android:layout_width="match_parent"
+          android:layout_height="match_parent" />
 
-</LinearLayout>
+      <Button android:text="Freeze"
+          android:id="@+id/someButton"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content" />
+
+    </com.dealrinc.gmvScanner.ui.camera.CameraSourcePreview>
+
+  </LinearLayout>
+
+  <LinearLayout
+      android:id="@+id/resultOverlay"
+      android:layout_width="fill_parent"
+      android:layout_height="fill_parent"
+      android:background="#bb000000"
+      android:clickable="true"
+      android:orientation="vertical"
+      android:textAlignment="center"
+      android:visibility="gone">
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:layout_marginTop="100dp"
+        android:contentDescription="success"
+        android:layout_gravity="center_vertical"
+        android:src="@drawable/ic_check_black_24dp" />
+
+    <TextView
+        android:id="@+id/barcodeValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAlignment="center"
+        android:layout_marginTop="50dp"
+        android:layout_marginLeft="16dp"
+        android:layout_marginRight="16dp"
+        android:textColor="#FFFFFF"
+        android:textFontWeight="500"
+        android:textSize="30sp" />
+  </LinearLayout>
+</RelativeLayout>

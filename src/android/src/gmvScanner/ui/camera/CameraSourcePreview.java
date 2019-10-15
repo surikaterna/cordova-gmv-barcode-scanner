@@ -29,6 +29,8 @@ import android.view.ViewGroup;
 import android.view.View;
 import android.widget.Button;
 import android.os.Build;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 
 import com.google.android.gms.common.images.Size;
 
@@ -54,6 +56,7 @@ public class CameraSourcePreview extends ViewGroup {
     public CameraSourcePreview(Context context, AttributeSet attrs) {
         super(context, attrs);
         mContext = context;
+
         mStartRequested = false;
         mSurfaceAvailable = false;
 
@@ -66,19 +69,23 @@ public class CameraSourcePreview extends ViewGroup {
         mViewFinderView.layout(0,0, 500, 500);
         addView(mViewFinderView);
 
+        RelativeLayout layout = new RelativeLayout(context);
+        RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        layoutParams.topMargin = 50;
+        layoutParams.leftMargin = 90;
+        layout.setLayoutParams(layoutParams);
+
         mTorchButton = new Button(mContext);
         mTorchButton.setBackgroundResource(getResources().getIdentifier("torch_inactive", "drawable", mContext.getPackageName()));
-        mTorchButton.layout(0,0, dpToPx(45),dpToPx(45));
         mTorchButton.setMaxWidth(50);
-        mTorchButton.setRotation(90);
 
         mTorchButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 try {
-                        mCameraSource.setFlashMode(!mFlashState?Camera.Parameters.FLASH_MODE_TORCH :Camera.Parameters.FLASH_MODE_OFF);
-                        mFlashState = !mFlashState;
-                        mTorchButton.setBackgroundResource(getResources().getIdentifier(mFlashState ? "torch_active" : "torch_inactive", "drawable", mContext.getPackageName()));
+                    mCameraSource.setFlashMode(!mFlashState?Camera.Parameters.FLASH_MODE_TORCH :Camera.Parameters.FLASH_MODE_OFF);
+                    mFlashState = !mFlashState;
+                    mTorchButton.setBackgroundResource(getResources().getIdentifier(mFlashState ? "torch_active" : "torch_inactive", "drawable", mContext.getPackageName()));
                 } catch(Exception e) {
 
                 }
@@ -173,8 +180,8 @@ public class CameraSourcePreview extends ViewGroup {
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        int width = 320;
-        int height = 240;
+        int width = 400;
+        int height = 200;
         if (mCameraSource != null) {
             Size size = mCameraSource.getPreviewSize();
             if (size != null) {
@@ -218,11 +225,11 @@ public class CameraSourcePreview extends ViewGroup {
 
         mViewFinderView.layout(layoutWidth/2 -actualWidth/2,layoutHeight/2 - actualHeight/2, layoutWidth/2 + actualWidth/2, layoutHeight/2 + actualHeight/2);
 
-        int buttonSize = dpToPx(45);
+        int buttonSize = dpToPx(48);
         int torchLeft = (int) layoutWidth/2 + actualWidth/2 + (layoutWidth - (layoutWidth/2 + actualWidth/2))/2 - buttonSize/2;
         int torchTop = layoutHeight - (layoutWidth-torchLeft);
 
-        mTorchButton.layout(torchLeft, torchTop, torchLeft + buttonSize, torchTop + buttonSize);
+        mTorchButton.layout(layoutWidth - buttonSize - 40, layoutHeight - buttonSize - 40, layoutWidth - 40, layoutHeight - 40);
 
         try {
             startIfReady();
@@ -234,15 +241,16 @@ public class CameraSourcePreview extends ViewGroup {
     }
 
     private boolean isPortraitMode() {
-        int orientation = mContext.getResources().getConfiguration().orientation;
-        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            return false;
-        }
-        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            return true;
-        }
+        return true;
+        // int orientation = mContext.getResources().getConfiguration().orientation;
+        // if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        //     return false;
+        // }
+        // if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+        //     return true;
+        // }
 
-        Log.d(TAG, "isPortraitMode returning false by default");
-        return false;
+        // Log.d(TAG, "isPortraitMode returning false by default");
+        // return false;
     }
 }

@@ -16,13 +16,17 @@
 
 package com.dealrinc.gmvScanner;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.app.Activity;
 import android.util.Log;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.vision.barcode.Barcode;
@@ -43,6 +47,7 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
     private static final int RC_BARCODE_CAPTURE = 9001;
     private static final String TAG = "BarcodeMain";
 
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -53,11 +58,10 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
         Intent intent = new Intent(this, BarcodeCaptureActivity.class);
 
         intent.putExtra("DetectionTypes", getIntent().getIntExtra("DetectionTypes", 1234));
-        intent.putExtra("ViewFinderWidth", getIntent().getDoubleExtra("DetectionTypes", .5));
-        intent.putExtra("ViewFinderHeight", getIntent().getDoubleExtra("DetectionTypes", .7));
+        intent.putExtra("ViewFinderWidth", getIntent().getDoubleExtra("ViewFinderWidth", .5));
+        intent.putExtra("ViewFinderHeight", getIntent().getDoubleExtra("ViewFinderHeight", .7));
 
         startActivityForResult(intent, RC_BARCODE_CAPTURE);
-
     }
 
     /**
@@ -101,6 +105,7 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         Log.d(TAG, "Activity exited");
+
         if (requestCode == RC_BARCODE_CAPTURE) {
             Intent d = new Intent();
             if (resultCode == CommonStatusCodes.SUCCESS) {

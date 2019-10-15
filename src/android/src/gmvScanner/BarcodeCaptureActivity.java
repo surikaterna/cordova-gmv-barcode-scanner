@@ -26,9 +26,12 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.hardware.Camera;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.support.annotation.NonNull;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
@@ -39,10 +42,12 @@ import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.view.WindowManager;
 import android.view.Display;
 import android.graphics.Point;
+import android.content.pm.ActivityInfo;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
@@ -56,6 +61,7 @@ import com.google.android.gms.vision.barcode.Barcode;
 import com.google.android.gms.vision.barcode.BarcodeDetector;
 import com.google.android.gms.common.images.Size;
 
+
 import java.io.IOException;
 
 /**
@@ -65,6 +71,7 @@ import java.io.IOException;
  */
 public final class BarcodeCaptureActivity extends AppCompatActivity implements BarcodeGraphicTracker.BarcodeUpdateListener {
     private static final String TAG = "Barcode-reader";
+    private static final int DISPLAY_RESULT_DURATION = 1500;
 
     // intent request code to handle updating play services if needed.
     private static final int RC_HANDLE_GMS = 9001;
@@ -74,8 +81,9 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
 
     // constants used to pass extra data in the intent
     public Integer DetectionTypes;
-    public double ViewFinderWidth = .5;
-    public double ViewFinderHeight = .7;
+    public double ViewFinderWidth = .925;
+    public double ViewFinderHeight = .4;
+    private boolean multipleScan;
 
     public static final String BarcodeObject = "Barcode";
 
@@ -83,9 +91,14 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     private CameraSourcePreview mPreview;
     private GraphicOverlay<BarcodeGraphic> mGraphicOverlay;
 
+    private View mOverlayView;
+    private TextView mScannedBarcodeTextView;
+
     // helper objects for detecting taps and pinches.
     private ScaleGestureDetector scaleGestureDetector;
     private GestureDetector gestureDetector;
+
+    private String latestBarcode = null;
 
     /**
      * Initializes the UI and creates the detector pipeline.
@@ -98,6 +111,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         View decorView = getWindow().getDecorView();
         int uiOptions = View.SYSTEM_UI_FLAG_FULLSCREEN;
         decorView.setSystemUiVisibility(uiOptions);
+        this.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         // Remember that you should never show the action bar if the
         // status bar is hidden, so hide that too if necessary.
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -118,11 +132,14 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         mPreview.ViewFinderHeight = ViewFinderHeight;
         mGraphicOverlay = (GraphicOverlay<BarcodeGraphic>) findViewById(getResources().getIdentifier("graphicOverlay", "id", getPackageName()));
 
+        mOverlayView = findViewById(getResources().getIdentifier("resultOverlay", "id", getPackageName()));
+        mScannedBarcodeTextView = (TextView) findViewById(getResources().getIdentifier("barcodeValue", "id", getPackageName()));
 
         // read parameters from the intent used to launch the activity.
         DetectionTypes = getIntent().getIntExtra("DetectionTypes", 1234);
         ViewFinderWidth = getIntent().getDoubleExtra("ViewFinderWidth", .5);
         ViewFinderHeight = getIntent().getDoubleExtra("ViewFinderHeight", .7);
+        multipleScan = getIntent().getBooleanExtra("MultipleScan", true);
 
         // Check for the camera permission before accessing the camera.  If the
         // permission is not granted yet, request permission.
@@ -256,7 +273,8 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         }
 
         mCameraSource = builder
-                .setFlashMode(useFlash ? Camera.Parameters.FLASH_MODE_TORCH : null)
+                .setFlashMode(Camera.Parameters.FLASH_MODE_TORCH)
+                // .setFlashMode(useFlash ? Camera.Parameters.FLASH_MODE_TORCH : null)
                 .build();
     }
 
@@ -508,7 +526,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
             val = val.replaceAll("[ioqIOQ]", "");
 
             val = val.substring(0, Math.min(val.length(), 17));
-            
+
             barcode.rawValue = val;
 
             if(validateVin(val)) {
@@ -521,9 +539,36 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         } else {
             Intent data = new Intent();
             data.putExtra(BarcodeObject, barcode);
-            setResult(CommonStatusCodes.SUCCESS, data);
-            finish();
-        }
+            Log.d(TAG, "Scan test without finish" + barcode.rawValue);
+            Log.d(TAG, "Multiple scan" + multipleScan);
+            if (multipleScan) {
+                String prevBarcode = latestBarcode;
+                latestBarcode = barcode.rawValue;
+                if (prevBarcode == barcode.rawValue && mOverlayView.getVisibility() == View.VISIBLE) {
+                    return;
+                }
 
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        mOverlayView.setVisibility(View.VISIBLE);
+                        mScannedBarcodeTextView.setText(barcode.rawValue);
+                        final Handler handler = new Handler(Looper.getMainLooper());
+                        handler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                mOverlayView.setVisibility(View.INVISIBLE);
+                            }
+                        }, DISPLAY_RESULT_DURATION);
+                    }
+                });
+                Intent broadcastIntent = new Intent("com.local.receiver");
+                broadcastIntent.putExtra(BarcodeObject, barcode);
+                sendBroadcast(broadcastIntent);
+            } else {
+                setResult(CommonStatusCodes.SUCCESS, data);
+                finish();
+            }
+        }
     }
 }
