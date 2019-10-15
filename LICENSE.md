@@ -1,5 +1,6 @@
 MIT License
 
+Copyright (c) 2019 heartmon
 Copyright (c) 2018 Dealr, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
