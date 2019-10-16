@@ -97,6 +97,11 @@
                      target-dir="src/com/dealrinc/gmvScanner/ui/camera"/>
         <source-file src="src/android/src/gmvScanner/ui/camera/GraphicOverlay.java"
                      target-dir="src/com/dealrinc/gmvScanner/ui/camera"/>
+                     
+        <source-file src="src/android/src/gmvScanner/BoxDetector.java"
+                     target-dir="src/com/dealrinc/gmvScanner"/>
+        <source-file src="src/android/src/gmvScanner/CentralBarcodeFocusingProcessor.java"
+                     target-dir="src/com/dealrinc/gmvScanner"/>
 
         <resource-file src="src/android/res/layout/activity_main.xml"
                        target="res/layout/activity_gmv_barcode_scanner.xml"/>
