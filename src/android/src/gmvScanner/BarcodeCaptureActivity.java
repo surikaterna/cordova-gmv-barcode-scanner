@@ -36,6 +36,7 @@ import android.support.annotation.NonNull;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -71,7 +72,7 @@ import java.io.IOException;
  */
 public final class BarcodeCaptureActivity extends AppCompatActivity implements BarcodeGraphicTracker.BarcodeUpdateListener {
     private static final String TAG = "Barcode-reader";
-    private static final int DISPLAY_RESULT_DURATION = 1500;
+    private static final int DISPLAY_RESULT_DURATION = 700;
 
     // intent request code to handle updating play services if needed.
     private static final int RC_HANDLE_GMS = 9001;
@@ -82,7 +83,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     // constants used to pass extra data in the intent
     public Integer DetectionTypes;
     public double ViewFinderWidth = .925;
-    public double ViewFinderHeight = .4;
+    public double ViewFinderHeight = .3;
     private boolean multipleScan;
 
     public static final String BarcodeObject = "Barcode";
@@ -226,10 +227,19 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         // create a separate tracker instance for each barcode.
         BarcodeDetector barcodeDetector = new BarcodeDetector.Builder(context).setBarcodeFormats(detectionType).build();
         BarcodeTrackerFactory barcodeFactory = new BarcodeTrackerFactory(mGraphicOverlay, this);
-        barcodeDetector.setProcessor(
-                new MultiProcessor.Builder<>(barcodeFactory).build());
+        //qrBorder 280dp
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int finderWidthInDp = (int) (dm.widthPixels / dm.density);
+        int finderHeightInDp = (int) (dm.heightPixels / dm.density);
+        int boxHeight = (int)((finderWidthInDp * dm.density) + 0.5);
+        int boxWidth = (int)((finderHeightInDp * dm.density) + 0.5);
+        BoxDetector boxDetector = new BoxDetector(barcodeDetector, boxWidth, boxHeight);
+        boxDetector.setProcessor(
+                new CentralBarcodeFocusingProcessor(barcodeDetector, barcodeFactory.create(null), boxWidth, boxHeight));
+//        boxDetector.setProcessor(
+//                new MultiProcessor.Builder<>(barcodeFactory).build());
 
-        if (!barcodeDetector.isOperational()) {
+        if (!boxDetector.isOperational()) {
             // Note: The first time that an app using the barcode or face API is installed on a
             // device, GMS will download a native libraries to the device in order to do detection.
             // Usually this completes before the app is run for the first time.  But if that
@@ -261,7 +271,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         // Creates and starts the camera.  Note that this uses a higher resolution in comparison
         // to other detection examples to enable the barcode detector to detect small barcodes
         // at long distances.
-        CameraSource.Builder builder = new CameraSource.Builder(getApplicationContext(), barcodeDetector)
+        CameraSource.Builder builder = new CameraSource.Builder(getApplicationContext(), boxDetector)
                 .setFacing(CameraSource.CAMERA_FACING_BACK)
                 .setRequestedPreviewSize(1600, 1024)
                 .setRequestedFps(15.0f);
@@ -544,7 +554,8 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
             if (multipleScan) {
                 String prevBarcode = latestBarcode;
                 latestBarcode = barcode.rawValue;
-                if (prevBarcode == barcode.rawValue && mOverlayView.getVisibility() == View.VISIBLE) {
+//                prevBarcode == barcode.rawValue &&
+                if (mOverlayView.getVisibility() == View.VISIBLE) {
                     return;
                 }
 

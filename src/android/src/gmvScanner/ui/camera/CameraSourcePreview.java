@@ -46,7 +46,7 @@ public class CameraSourcePreview extends ViewGroup {
     private boolean mStartRequested;
     private boolean mSurfaceAvailable;
     private CameraSource mCameraSource;
-    private boolean mFlashState = false;
+    private boolean mFlashState = true;
 
     public double ViewFinderWidth = .5;
     public double ViewFinderHeight = .7;
@@ -76,7 +76,8 @@ public class CameraSourcePreview extends ViewGroup {
         layout.setLayoutParams(layoutParams);
 
         mTorchButton = new Button(mContext);
-        mTorchButton.setBackgroundResource(getResources().getIdentifier("torch_inactive", "drawable", mContext.getPackageName()));
+        mTorchButton.setBackgroundResource(getResources().getIdentifier("torch_active", "drawable", mContext.getPackageName()));
+//        mTorchButton.layout(dpToPx(-200),0, 0 ,-200);
         mTorchButton.setMaxWidth(50);
 
         mTorchButton.setOnClickListener(new View.OnClickListener() {

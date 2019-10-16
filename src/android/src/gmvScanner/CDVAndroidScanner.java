@@ -70,8 +70,8 @@ public class CDVAndroidScanner extends CordovaPlugin {
     private void openNewActivity(Context context, JSONArray args) {
         Intent intent = new Intent(context, SecondaryActivity.class);
         intent.putExtra("DetectionTypes", args.optInt(0, 1234));
-        intent.putExtra("ViewFinderWidth", args.optDouble(1, .5));
-        intent.putExtra("ViewFinderHeight", args.optDouble(2, .7));
+        intent.putExtra("ViewFinderWidth", args.optDouble(1, .925));
+        intent.putExtra("ViewFinderHeight", args.optDouble(2, .3));
         intent.putExtra("MultipleScan", args.optBoolean(3, true));
 
         Log.d(TAG, intent.toString());
@@ -79,7 +79,7 @@ public class CDVAndroidScanner extends CordovaPlugin {
         receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent data) {
-                Toast.makeText(context,"Broadcast Received in Activity called",Toast.LENGTH_SHORT).show();
+//                Toast.makeText(context,"Broadcast Received in Activity called",Toast.LENGTH_SHORT).show();
                 Barcode barcode = data.getParcelableExtra(BarcodeCaptureActivity.BarcodeObject);
                 JSONArray result = new JSONArray();
                 result.put(barcode.rawValue);
@@ -109,7 +109,6 @@ public class CDVAndroidScanner extends CordovaPlugin {
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        Log.d(TAG, "TEST" + resultCode);
         if (resultCode == CommonStatusCodes.ERROR) {
             Log.d(TAG, "Exit barcode scanner");
             this.cordova.getActivity().unregisterReceiver(receiver);
