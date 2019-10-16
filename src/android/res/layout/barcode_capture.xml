@@ -38,12 +38,13 @@
       android:clickable="true"
       android:orientation="vertical"
       android:textAlignment="center"
+      android:gravity="center"
       android:visibility="gone">
 
     <ImageView
         android:layout_width="match_parent"
         android:layout_height="200dp"
-        android:layout_marginTop="100dp"
+        android:layout_marginTop="-120dp"
         android:contentDescription="success"
         android:layout_gravity="center_vertical"
         android:src="@drawable/ic_check_black_24dp" />
@@ -58,6 +59,6 @@
         android:layout_marginRight="16dp"
         android:textColor="#FFFFFF"
         android:textFontWeight="500"
-        android:textSize="30sp" />
+        android:textSize="28sp" />
   </LinearLayout>
 </RelativeLayout>
