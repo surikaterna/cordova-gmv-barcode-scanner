@@ -525,7 +525,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     }
 
     @Override
-    public void onBarcodeDetected(Barcode barcode) {
+    public void onBarcodeDetected(final Barcode barcode) {
         //do something with barcode data returned
 
         if(DetectionTypes == 0) {
