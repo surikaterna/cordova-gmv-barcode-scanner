@@ -15,7 +15,7 @@ Installation
 ------------
 
 ````
-cordova plugin add cordova-gmv-barcode-scanner
+cordova plugin add https://github.com/heartmon/cordova-gmv-barcode-scanner.git
 ````
 
 Usage
