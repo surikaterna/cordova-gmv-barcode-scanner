@@ -111,8 +111,13 @@ public class CDVAndroidScanner extends CordovaPlugin {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode == CommonStatusCodes.ERROR) {
             Log.d(TAG, "Exit barcode scanner");
+            String err = data.getStringExtra("err");
+            JSONArray result = new JSONArray();
+            result.put(err);
+            result.put("");
+            result.put("");
             this.cordova.getActivity().unregisterReceiver(receiver);
-            mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "Cancelled"));
+            mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, result));
         }
         else if (requestCode == RC_BARCODE_CAPTURE) {
             if (resultCode == CommonStatusCodes.SUCCESS) {
@@ -128,12 +133,12 @@ public class CDVAndroidScanner extends CordovaPlugin {
                     Log.d(TAG, "Barcode read: " + barcode.displayValue);
                 }
             } else {
-//                String err = data.getParcelableExtra("err");
+                String err = data.getParcelableExtra("err");
                 JSONArray result = new JSONArray();
-//                result.put(err);
-//                result.put("");
-//                result.put("");
-                mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "CANCELLED"));
+                result.put(err);
+                result.put("");
+                result.put("");
+                mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, result));
             }
         }
     }
