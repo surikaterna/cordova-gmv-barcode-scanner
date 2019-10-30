@@ -47,6 +47,7 @@ public class CameraSourcePreview extends ViewGroup {
     private boolean mSurfaceAvailable;
     private CameraSource mCameraSource;
     private boolean mFlashState = true;
+    public Button mCloseButton;
 
     public double ViewFinderWidth = .5;
     public double ViewFinderHeight = .7;
@@ -93,6 +94,12 @@ public class CameraSourcePreview extends ViewGroup {
             }
         });
         addView(mTorchButton);
+
+        mCloseButton = new Button(mContext);
+        mCloseButton.setBackgroundResource(getResources().getIdentifier("close_button", "drawable", mContext.getPackageName()));
+        mCloseButton.setMaxWidth(50);
+
+        addView(mCloseButton);
     }
 
     public int dpToPx(int dp) {
@@ -231,7 +238,8 @@ public class CameraSourcePreview extends ViewGroup {
         int torchTop = layoutHeight - (layoutWidth-torchLeft);
 
         mTorchButton.layout(layoutWidth - buttonSize - 40, layoutHeight - buttonSize - 40, layoutWidth - 40, layoutHeight - 40);
-
+        mCloseButton.layout(buttonSize - 40, layoutHeight - buttonSize - 40, buttonSize - 40 + buttonSize, layoutHeight - 40 );
+        
         try {
             startIfReady();
         } catch (SecurityException se) {
