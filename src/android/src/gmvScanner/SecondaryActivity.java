@@ -31,6 +31,9 @@ import android.widget.Toast;
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.vision.barcode.Barcode;
 
+import org.json.JSONArray;
+import org.apache.cordova.PluginResult;
+import org.apache.cordova.CallbackContext;
 /**
  * Main activity demonstrating how to pass extra parameters to an activity that
  * reads barcodes.
@@ -47,6 +50,7 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
     private static final int RC_BARCODE_CAPTURE = 9001;
     private static final String TAG = "BarcodeMain";
 
+    private BroadcastReceiver receiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,7 +65,55 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
         intent.putExtra("ViewFinderWidth", getIntent().getDoubleExtra("ViewFinderWidth", .5));
         intent.putExtra("ViewFinderHeight", getIntent().getDoubleExtra("ViewFinderHeight", .7));
 
+        receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent data) {
+                Barcode barcode = data.getParcelableExtra(BarcodeCaptureActivity.BarcodeObject);
+                Log.d(TAG, "Receive message on broadcast receiver");
+                JSONArray result = new JSONArray();
+                result.put(barcode.rawValue);
+                result.put("");
+                result.put("");
+                PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, result);
+                pluginResult.setKeepCallback(true);
+                OnReceiveBarcodeContext onReceiveBarcodeContext = OnReceiveBarcodeContext.getInstance();
+                CallbackContext callbackContext = onReceiveBarcodeContext.getCallbackContext();
+                callbackContext.sendPluginResult(pluginResult);
+            }
+        };
+
+        // register local receiver
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.local.receiver");
+        Log.d(TAG, "Registering receiver");
+        this.registerReceiver(receiver, filter);
+
         startActivityForResult(intent, RC_BARCODE_CAPTURE);
+    }
+
+    private void unregisterReceiver() {
+        try {
+            if (receiver != null) {
+                this.unregisterReceiver(receiver);
+                Log.d(TAG, "Unregister receiver");
+            } else {
+                Log.d(TAG, "Receiver not defined");
+            }
+        } catch (Exception exception) {
+            // do nothing
+            Log.d(TAG, "Cannot unregister receiver" + exception.getMessage());
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        try {
+            unregisterReceiver();
+            OnReceiveBarcodeContext onReceiveBarcodeContext = OnReceiveBarcodeContext.getInstance();
+            onReceiveBarcodeContext.clearCallbackContext();
+        } finally {
+            super.onDestroy();
+        }
     }
 
     /**

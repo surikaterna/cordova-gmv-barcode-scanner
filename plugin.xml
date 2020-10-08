@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="cordova-gmv-barcode-scanner" version="1.3" xmlns="http://apache.org/cordova/ns/plugins/1.0"
+<plugin id="cordova-gmv-barcode-scanner" version="1.4" xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android">
     <name>cordova-gmv-barcode-scanner</name>
     <js-module name="cordova-gmv-barcode-scanner" src="www/main.js">
@@ -101,6 +101,8 @@
         <source-file src="src/android/src/gmvScanner/BoxDetector.java"
                      target-dir="src/com/dealrinc/gmvScanner"/>
         <source-file src="src/android/src/gmvScanner/CentralBarcodeFocusingProcessor.java"
+                     target-dir="src/com/dealrinc/gmvScanner"/>
+        <source-file src="src/android/src/gmvScanner/OnReceiveBarcodeContext.java"
                      target-dir="src/com/dealrinc/gmvScanner"/>
 
         <resource-file src="src/android/res/layout/activity_main.xml"
