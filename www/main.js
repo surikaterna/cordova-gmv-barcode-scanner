@@ -28,7 +28,8 @@ GMVBarcodeScanner.prototype.scan = function(params, callback) {
         detectorSize: {
             width: .5,
             height: .7
-        }
+        },
+        multipleScan: true
     };
 
     for(var key in params) {
@@ -74,7 +75,9 @@ GMVBarcodeScanner.prototype.scan = function(params, callback) {
         //Position 2
         detectorWidth: settings.detectorSize.width,
         //Position 3
-        detectorHeight: settings.detectorSize.height
+        detectorHeight: settings.detectorSize.height,
+        //Position 4
+        multipleScan: settings.multipleScan
     };
 
     var sendSettings = [];

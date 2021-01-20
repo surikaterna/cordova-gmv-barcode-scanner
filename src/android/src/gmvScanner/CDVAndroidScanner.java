@@ -60,7 +60,6 @@ public class CDVAndroidScanner extends CordovaPlugin {
             t.start();
             return true;
         } else if (action.equals("stopScan")) {
-            this.cordova.getActivity().unregisterReceiver(receiver);
             mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "Cancelled"));
             this.cordova.getActivity().finish();
         }
@@ -75,35 +74,11 @@ public class CDVAndroidScanner extends CordovaPlugin {
         intent.putExtra("MultipleScan", args.optBoolean(3, true));
 
         Log.d(TAG, intent.toString());
-
-        receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent data) {
-//                Toast.makeText(context,"Broadcast Received in Activity called",Toast.LENGTH_SHORT).show();
-                Barcode barcode = data.getParcelableExtra(BarcodeCaptureActivity.BarcodeObject);
-                JSONArray result = new JSONArray();
-                result.put(barcode.rawValue);
-                result.put("");
-                result.put("");
-                PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, result);
-                pluginResult.setKeepCallback(true);
-                mCallbackContext.sendPluginResult(pluginResult);
-            }
-        };
-
-        // to register local receiver
-        filter = new IntentFilter();
-
-        filter.addAction("com.local.receiver");
-        this.cordova.getActivity().registerReceiver(receiver, filter);
-
+        
+        OnReceiveBarcodeContext onReceiveBarcodeContext = OnReceiveBarcodeContext.getInstance();
+        onReceiveBarcodeContext.setCallbackContext(mCallbackContext);
         this.cordova.setActivityResultCallback(this);
         this.cordova.startActivityForResult(this, intent, RC_BARCODE_CAPTURE);
-    }
-
-    @Override
-    public void onDestroy() {
-        this.cordova.getActivity().unregisterReceiver(receiver);
     }
 
     @Override
@@ -116,7 +91,6 @@ public class CDVAndroidScanner extends CordovaPlugin {
             result.put(err);
             result.put("");
             result.put("");
-            this.cordova.getActivity().unregisterReceiver(receiver);
             mCallbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, result));
         }
         else if (requestCode == RC_BARCODE_CAPTURE) {
