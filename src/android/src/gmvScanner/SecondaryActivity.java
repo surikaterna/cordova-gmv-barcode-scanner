@@ -64,6 +64,7 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
         intent.putExtra("DetectionTypes", getIntent().getIntExtra("DetectionTypes", 1234));
         intent.putExtra("ViewFinderWidth", getIntent().getDoubleExtra("ViewFinderWidth", .5));
         intent.putExtra("ViewFinderHeight", getIntent().getDoubleExtra("ViewFinderHeight", .7));
+        intent.putExtra("MultipleScan", getIntent().getBooleanExtra("MultipleScan", true));
 
         receiver = new BroadcastReceiver() {
             @Override
