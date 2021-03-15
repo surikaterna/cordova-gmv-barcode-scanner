@@ -104,6 +104,7 @@ public class CameraSourcePreview extends ViewGroup {
     }
 
     public void initViewState(boolean flashOn, boolean portraitOnly) {
+        mFlashState = flashOn;
         mTorchButton.setBackgroundResource(getResources().getIdentifier(flashOn ? "torch_active" : "torch_inactive", "drawable", mContext.getPackageName()));
         mPortraitOnly = portraitOnly;
     }

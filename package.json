@@ -1,6 +1,6 @@
 {
   "name": "@heartmon/cordova-gmv-barcode-scanner",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Google Mobile Vision Barcode Scanner Plugin (with multipleScan option)",
   "cordova": {
     "id": "cordova-gmv-barcode-scanner",

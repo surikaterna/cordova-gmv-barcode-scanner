@@ -86,6 +86,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     public double ViewFinderHeight = .3;
     private boolean multipleScan;
     private boolean flashOn;
+    private boolean portraitOnly;
 
     public static final String BarcodeObject = "Barcode";
 
