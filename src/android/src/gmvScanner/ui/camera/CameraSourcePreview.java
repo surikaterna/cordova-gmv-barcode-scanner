@@ -47,6 +47,7 @@ public class CameraSourcePreview extends ViewGroup {
     private boolean mSurfaceAvailable;
     private CameraSource mCameraSource;
     private boolean mFlashState = true;
+    private boolean mPortraitOnly = true;
     public Button mCloseButton;
 
     public double ViewFinderWidth = .5;
@@ -100,6 +101,11 @@ public class CameraSourcePreview extends ViewGroup {
         mCloseButton.setMaxWidth(50);
 
         addView(mCloseButton);
+    }
+
+    public void initViewState(boolean flashOn, boolean portraitOnly) {
+        mTorchButton.setBackgroundResource(getResources().getIdentifier(flashOn ? "torch_active" : "torch_inactive", "drawable", mContext.getPackageName()));
+        mPortraitOnly = portraitOnly;
     }
 
     public int dpToPx(int dp) {
@@ -250,16 +256,18 @@ public class CameraSourcePreview extends ViewGroup {
     }
 
     private boolean isPortraitMode() {
-        return true;
-        // int orientation = mContext.getResources().getConfiguration().orientation;
-        // if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-        //     return false;
-        // }
-        // if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-        //     return true;
-        // }
+        if (mPortraitOnly) {
+            return true;
+        }
+        int orientation = mContext.getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            return false;
+        }
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            return true;
+        }
 
-        // Log.d(TAG, "isPortraitMode returning false by default");
-        // return false;
+        Log.d(TAG, "isPortraitMode returning true by default");
+        return true;
     }
 }

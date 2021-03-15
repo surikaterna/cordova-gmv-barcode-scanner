@@ -85,6 +85,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     public double ViewFinderWidth = .925;
     public double ViewFinderHeight = .3;
     private boolean multipleScan;
+    private boolean flashOn;
 
     public static final String BarcodeObject = "Barcode";
 
@@ -148,12 +149,16 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         ViewFinderWidth = getIntent().getDoubleExtra("ViewFinderWidth", .5);
         ViewFinderHeight = getIntent().getDoubleExtra("ViewFinderHeight", .7);
         multipleScan = getIntent().getBooleanExtra("MultipleScan", true);
+        flashOn = getIntent().getBooleanExtra("FlashOn", true);
+        portraitOnly = getIntent().getBooleanExtra("PortraitOnly", true);
+
+        mPreview.initViewState(flashOn, portraitOnly);
 
         // Check for the camera permission before accessing the camera.  If the
         // permission is not granted yet, request permission.
         int rc = ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA);
         if (rc == PackageManager.PERMISSION_GRANTED) {
-            createCameraSource(true, false);
+            createCameraSource(true, flashOn);
         } else {
             requestCameraPermission();
         }
@@ -290,8 +295,8 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
         }
 
         mCameraSource = builder
-                .setFlashMode(Camera.Parameters.FLASH_MODE_TORCH)
-                // .setFlashMode(useFlash ? Camera.Parameters.FLASH_MODE_TORCH : null)
+                // .setFlashMode(Camera.Parameters.FLASH_MODE_TORCH)
+                .setFlashMode(useFlash ? Camera.Parameters.FLASH_MODE_TORCH : null)
                 .build();
     }
 
@@ -360,7 +365,7 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
             ViewFinderWidth = getIntent().getDoubleExtra("ViewFinderWidth", .5);
             ViewFinderHeight = getIntent().getDoubleExtra("ViewFinderHeight", .7);
 
-            createCameraSource(true, false);
+            createCameraSource(true, flashOn);
             return;
         }
 

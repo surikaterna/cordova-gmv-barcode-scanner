@@ -72,6 +72,8 @@ public class CDVAndroidScanner extends CordovaPlugin {
         intent.putExtra("ViewFinderWidth", args.optDouble(1, .925));
         intent.putExtra("ViewFinderHeight", args.optDouble(2, .3));
         intent.putExtra("MultipleScan", args.optBoolean(3, true));
+        intent.putExtra("FlashOn", args.optBoolean(4, true));
+        intent.putExtra("PortraitOnly", args.optBoolean(5, true));
 
         Log.d(TAG, intent.toString());
         
