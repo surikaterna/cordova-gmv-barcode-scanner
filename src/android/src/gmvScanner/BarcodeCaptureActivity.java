@@ -329,7 +329,11 @@ public final class BarcodeCaptureActivity extends AppCompatActivity implements B
     protected void onDestroy() {
         super.onDestroy();
         if (mPreview != null) {
-            mPreview.release();
+            // This a temp fix, due to somewhere in the stack,
+            // a object is null and tries to call .release(),
+            // which makes the whole application to crash,
+            // when you just close the camera.
+            // mPreview.release();
         }
     }
 
