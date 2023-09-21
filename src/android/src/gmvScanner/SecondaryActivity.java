@@ -89,7 +89,13 @@ public class SecondaryActivity extends Activity implements View.OnClickListener 
         IntentFilter filter = new IntentFilter();
         filter.addAction("com.local.receiver");
         Log.d(TAG, "Registering receiver");
-        this.registerReceiver(receiver, filter);
+        
+        // Android 7.1 and below can't use this method
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            this.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            this.registerReceiver(receiver, filter);
+        }
 
         startActivityForResult(intent, RC_BARCODE_CAPTURE);
     }
