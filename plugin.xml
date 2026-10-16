@@ -20,10 +20,10 @@
         <framework src="Foundation.framework"/>
         <framework src="AVFoundation.framework"/>
         <framework src="UIKit.framework"/>
-        <framework spec="~&gt; 1.1" src="GoogleMobileVision/BarcodeDetector" type="podspec"/>
         <header-file src="src/ios/CDViOSScanner.h"/>
         <source-file src="src/ios/CDViOSScanner.m"/>
         <header-file src="src/ios/CameraViewController.h"/>
+        <header-file src="src/ios/ScannerUtils.h"/>
         <source-file src="src/ios/CameraViewController.m"/>
     </platform>
     <platform name="android">

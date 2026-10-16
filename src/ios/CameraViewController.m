@@ -1,12 +1,12 @@
 /*
  Copyright 2016-present Google Inc. All Rights Reserved.
- 
+
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
- 
+
  http://www.apache.org/licenses/LICENSE-2.0
- 
+
  Unless required by applicable law or agreed to in writing, software
  distributed under the License is distributed on an "AS IS" BASIS,
  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,550 +14,311 @@
  limitations under the License.
  */
 
-@import AVFoundation;
-@import Vision;
-@import GoogleMobileVision;
-
+// API-compatible AVFoundation backend for cordova-gmv-barcode-scanner.
+// No GoogleMobileVision dependency or per-frame image copying is required.
 #import "CameraViewController.h"
+#import "ScannerUtils.h"
+#import <AVFoundation/AVFoundation.h>
+#include <math.h>
 
-
-@interface CameraViewController ()<AVCaptureVideoDataOutputSampleBufferDelegate>
-
-@property(nonatomic, weak) IBOutlet UIView *placeHolderView;
-@property(nonatomic, weak) IBOutlet UIView *overlayView;
-@property(nonatomic, strong) UIImageView *imageView;
-
+@interface CameraViewController () <AVCaptureMetadataOutputObjectsDelegate>
 @property(nonatomic, strong) AVCaptureSession *session;
-@property(nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
-@property(nonatomic, strong) dispatch_queue_t videoDataOutputQueue;
+@property(nonatomic, strong) AVCaptureDevice *camera;
+@property(nonatomic, strong) AVCaptureMetadataOutput *metadataOutput;
 @property(nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
-
-@property(nonatomic, strong) GMVDetector *barcodeDetector;
+@property(nonatomic, strong) dispatch_queue_t sessionQueue;
+@property(nonatomic, strong) UIView *scanFrame;
 @property(nonatomic, strong) UIButton *torchButton;
-
+@property(nonatomic, strong) UIButton *cancelButton;
+@property(nonatomic, strong) UILabel *instruction;
+@property(atomic) BOOL active;
+@property(atomic) BOOL suspended;
+@property(atomic) BOOL completed;
+@property(nonatomic) BOOL configured; // accessed only on sessionQueue
 @end
 
 @implementation CameraViewController
-@synthesize delegate;
 
-- (BOOL)prefersStatusBarHidden
-{
-    return YES;
-}
+- (BOOL)prefersStatusBarHidden { return YES; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
+- (BOOL)shouldAutorotate { return NO; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait; }
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation { return UIInterfaceOrientationPortrait; }
 
-- (BOOL)prefersHomeIndicatorAutoHidden
-{
-    return YES;
-}
-
--(BOOL) shouldAutorotate
-{
-    return NO;
-}
-
--(NSUInteger)supportedInterfaceOrientations {
-    return UIInterfaceOrientationMaskPortrait;
-}
-
-- (id)initWithCoder:(NSCoder *)aDecoder {
-    self = [super initWithCoder:aDecoder];
-    if (self) {
-        _videoDataOutputQueue = dispatch_queue_create("VideoDataOutputQueue",
-                                                      DISPATCH_QUEUE_SERIAL);
-    }
-    return self;
+- (UIButton *)buttonWithSymbol:(NSString *)symbol action:(SEL)action label:(NSString *)label {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
+    button.tintColor = UIColor.whiteColor;
+    button.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.85];
+    button.layer.cornerRadius = 24;
+    button.accessibilityLabel = label;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:button];
+    return button;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
-    // Set up camera.
+    self.view.backgroundColor = UIColor.blackColor;
+    self.sessionQueue = dispatch_queue_create("se.surikat.barcode.capture", DISPATCH_QUEUE_SERIAL);
     self.session = [[AVCaptureSession alloc] init];
-    self.session.sessionPreset = AVCaptureSessionPresetHigh;
-    
-    _videoDataOutputQueue = dispatch_queue_create("VideoDataOutputQueue",
-                                                  DISPATCH_QUEUE_SERIAL);
-    
-    [self updateCameraSelection];
-    
-    // Set up video processing pipeline.
-    [self setUpVideoProcessing];
-    
-    // Set up camera preview.
-    [self setUpCameraPreview];
-    
-    
-    //Parse Cordova settings.
-    NSNumber *formats = 0;
-    //If barcodeFormats == 0 then process as a VIN with VIN verifications.
-    if([_barcodeFormats  isEqual: @0]) {
-        NSLog(@"Running VIN style");
-        formats = @(GMVDetectorBarcodeFormatCode39|GMVDetectorBarcodeFormatDataMatrix);
-    } else if([_barcodeFormats  isEqual: @1234]) {
-        
-    } else {
-        formats = _barcodeFormats;
-    }
-    NSLog(@"_barcodeFormats %@, %@", _barcodeFormats, formats);
-    
-    // Initialize barcode detector.
-    NSDictionary *options = @{
-                              GMVDetectorBarcodeFormats: formats
-                              };
-    self.barcodeDetector = [GMVDetector detectorOfType:GMVDetectorTypeBarcode options:options];
-    
-}
+    self.metadataOutput = [[AVCaptureMetadataOutput alloc] init];
+    self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.session];
+    self.previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    [self.view.layer addSublayer:self.previewLayer];
 
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    
-    self.previewLayer.frame = self.view.layer.bounds;
-    self.previewLayer.position = CGPointMake(CGRectGetMidX(self.previewLayer.frame),
-                                             CGRectGetMidY(self.previewLayer.frame));
-}
+    self.scanFrame = [[UIView alloc] init];
+    self.scanFrame.layer.borderColor = UIColor.whiteColor.CGColor;
+    self.scanFrame.layer.borderWidth = 3;
+    self.scanFrame.layer.cornerRadius = 8;
+    [self.scanFrame addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(focusAtPoint:)]];
+    [self.view addSubview:self.scanFrame];
+    self.cancelButton = [self buttonWithSymbol:@"xmark" action:@selector(cancelScan) label:NSLocalizedString(@"Close scanner", nil)];
+    self.torchButton = [self buttonWithSymbol:@"flashlight.on.fill" action:@selector(toggleTorch) label:NSLocalizedString(@"Toggle torch", nil)];
+    self.torchButton.enabled = NO;
+    self.instruction = [[UILabel alloc] init];
+    self.instruction.text = NSLocalizedString(@"Place a barcode inside the frame", nil);
+    self.instruction.textColor = UIColor.whiteColor;
+    self.instruction.textAlignment = NSTextAlignmentCenter;
+    self.instruction.numberOfLines = 2;
+    [self.view addSubview:self.instruction];
 
-- (void)viewDidUnload {
-    [self cleanupCaptureSession];
-    [super viewDidUnload];
+    NSNotificationCenter *notifications = NSNotificationCenter.defaultCenter;
+    [notifications addObserver:self selector:@selector(enteredBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [notifications addObserver:self selector:@selector(becameActive:) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [notifications addObserver:self selector:@selector(captureFailed:) name:AVCaptureSessionRuntimeErrorNotification object:self.session];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    //Force portrait orientation.
-    [[UIDevice currentDevice] setValue:
-     [NSNumber numberWithInteger: UIInterfaceOrientationPortrait]
-                                forKey:@"orientation"];
-    
-    [self.session startRunning];
-    
+    self.active = YES;
+    self.suspended = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
+    [self startCapture];
 }
 
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-    [self.session stopRunning];
+- (void)viewWillDisappear:(BOOL)animated {
+    self.active = NO;
+    [self stopCapture];
+    [super viewWillDisappear:animated];
 }
 
-#pragma mark - AVCaptureVideoDataOutputSampleBufferDelegate
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [self.metadataOutput setMetadataObjectsDelegate:nil queue:NULL];
+    AVCaptureSession *session = _session;
+    dispatch_queue_t queue = _sessionQueue;
+    if (session && queue) dispatch_async(queue, ^{ if (session.running) [session stopRunning]; });
+}
 
-- (void)captureOutput:(AVCaptureOutput *)captureOutput
-didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
-       fromConnection:(AVCaptureConnection *)connection {
-    
-    //Convert sampleBuffer into an image.
-    UIImage *image = [GMVUtility sampleBufferTo32RGBA:sampleBuffer];
-    
-    //We're going to crop UIImage to the onscreen viewfinder's box size for faster processing.
-    UIImage *croppedImg = nil;
-    //Rotate the image.
-    UIImage * portraitImage = [[UIImage alloc] initWithCGImage: image.CGImage
-                                                         scale: 1.0
-                                                   orientation: UIImageOrientationRight];
-    //Define the crop coordinates.
-    CGRect screenRect = [[UIScreen mainScreen] bounds];
-    CGFloat screenWidth = screenRect.size.width;
-    CGFloat screenHeight = screenRect.size.height;
-    
-    CGFloat frameWidth = screenWidth*_scanAreaHeight;
-    CGFloat frameHeight = screenHeight*_scanAreaWidth;
-    
-    CGFloat imageWidth = image.size.width;
-    CGFloat imageHeight = image.size.height;
-    
-    CGFloat actualFrameWidth = 0;
-    CGFloat actualFrameHeight = 0;
-    
-    //Figure out which ratio is bigger and then subtract a value off the frame width in case some of the camera preview is hanging off screen.
-    if(imageWidth/screenWidth < imageHeight/screenHeight){
-        actualFrameWidth = frameWidth * imageWidth/screenWidth - frameWidth/(imageHeight/screenHeight);
-        actualFrameHeight = frameHeight * imageHeight/screenHeight;
-    } else {
-        actualFrameWidth = frameWidth * imageWidth/screenWidth;
-        actualFrameHeight = frameHeight * imageHeight/screenHeight - frameHeight/(imageWidth/screenWidth);
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGRect bounds = self.view.bounds;
+    self.previewLayer.frame = bounds;
+    CGFloat width = isfinite(self.scanAreaWidth) && self.scanAreaWidth > 0 ? MIN(self.scanAreaWidth, 1) : 0.5;
+    CGFloat height = isfinite(self.scanAreaHeight) && self.scanAreaHeight > 0 ? MIN(self.scanAreaHeight, 1) : 0.7;
+    self.scanFrame.frame = CGRectMake(CGRectGetMidX(bounds) - bounds.size.width * width / 2,
+                                     CGRectGetMidY(bounds) - bounds.size.height * height / 2,
+                                     bounds.size.width * width, bounds.size.height * height);
+    CGFloat bottom = bounds.size.height - self.view.safeAreaInsets.bottom - 68;
+    self.cancelButton.frame = CGRectMake(24, bottom, 48, 48);
+    self.torchButton.frame = CGRectMake(bounds.size.width - 72, bottom, 48, 48);
+    self.instruction.frame = CGRectMake(20, MAX(self.view.safeAreaInsets.top + 8, self.scanFrame.frame.origin.y - 52), bounds.size.width - 40, 44);
+    [self updateScanArea];
+}
+
+- (void)updateScanArea {
+    AVCaptureConnection *connection = self.previewLayer.connection;
+    if (!connection) return;
+    if (@available(iOS 17.0, *)) {
+        if ([connection isVideoRotationAngleSupported:90]) connection.videoRotationAngle = 90;
+    } else if (connection.isVideoOrientationSupported) {
+        connection.videoOrientation = AVCaptureVideoOrientationPortrait;
     }
-    //Define crop rectangle.
-    CGRect cropRect = CGRectMake(imageWidth/2 - actualFrameWidth/2, imageHeight/2 - actualFrameHeight/2, actualFrameWidth, actualFrameHeight);
-    //Crop image
-    croppedImg = [self croppIngimageByImageName:portraitImage toRect:cropRect];
-    
-    //Test code to place the resultant cropped image onto the display to verify sizing.
-    /*dispatch_async(dispatch_get_main_queue(), ^{
-     UIImage *previewImage = [[UIImage alloc] initWithCGImage: croppedImg.CGImage
-     scale: 1.0
-     orientation: UIImageOrientationRight];
-     self.imageView.image = previewImage;
-     });//*/
-    
-    //Send the image through the barcode reader.
-    NSArray<GMVBarcodeFeature *> *barcodes = [self.barcodeDetector featuresInImage:croppedImg
-                                                                           options:nil];
-    //If no barcodes were detected then rotate the image 90 degrees. There is an issue with the barcode scanner not being able to scan data matrix in 2 orientations and rotation introduces at least one orientation to the mix.
-    if(sizeof barcodes == 0) {
-        croppedImg = [self rotateImage:croppedImg toOrientation:UIImageOrientationRight];
-        barcodes = [self.barcodeDetector featuresInImage:croppedImg
-                                                 options:nil];
+    CGRect rect = [self.previewLayer metadataOutputRectOfInterestForRect:self.scanFrame.frame];
+    AVCaptureMetadataOutput *output = self.metadataOutput;
+    dispatch_async(self.sessionQueue, ^{ output.rectOfInterest = rect; });
+}
+
+- (NSArray<AVMetadataObjectType> *)requestedTypes {
+    unsigned long mask = GMVEffectiveFormats(self.barcodeFormats ? self.barcodeFormats.unsignedLongValue : 1234);
+    NSDictionary<AVMetadataObjectType, NSNumber *> *formats = @{
+        AVMetadataObjectTypeCode128Code: @(GMVCode128),
+        AVMetadataObjectTypeCode39Code: @(GMVCode39),
+        AVMetadataObjectTypeCode39Mod43Code: @(GMVCode39),
+        AVMetadataObjectTypeCode93Code: @(GMVCode93),
+        AVMetadataObjectTypeDataMatrixCode: @(GMVDataMatrix),
+        AVMetadataObjectTypeEAN13Code: @(GMVEAN13 | GMVUPCA),
+        AVMetadataObjectTypeEAN8Code: @(GMVEAN8),
+        AVMetadataObjectTypeInterleaved2of5Code: @(GMVITF),
+        AVMetadataObjectTypeITF14Code: @(GMVITF),
+        AVMetadataObjectTypeQRCode: @(GMVQR),
+        AVMetadataObjectTypeUPCECode: @(GMVUPCE),
+        AVMetadataObjectTypePDF417Code: @(GMVPDF417),
+        AVMetadataObjectTypeAztecCode: @(GMVAztec)
+    };
+    NSMutableArray<AVMetadataObjectType> *types = [NSMutableArray array];
+    NSArray<AVMetadataObjectType> *available = self.metadataOutput.availableMetadataObjectTypes;
+    for (AVMetadataObjectType type in formats) {
+        if ((mask & formats[type].unsignedLongValue) && [available containsObject:type]) [types addObject:type];
     }
-    
-    //Iterate through barcodes.
-    dispatch_sync(dispatch_get_main_queue(), ^{
-        for (GMVBarcodeFeature *barcode in barcodes) {
-            NSLog(@"Barcode value: %@", barcode.rawValue);
-            
-            //If barcodeFormats == 0 then we're going to process with VIN validation, otherwise we'll just return the first result found and close out the barcode reader.
-            if([_barcodeFormats  isEqual: @0]) {
-                //If the barcode's length is less than 17 then we immediately know it's going to be invalid.
-                if([barcode.rawValue length] < 17) {
-                    continue;
-                }
-                NSString * vin = barcode.rawValue;
-                
-                //Remove characters from the set that are not part of standardized VIN structure.
-                NSCharacterSet *doNotWant = [NSCharacterSet characterSetWithCharactersInString:@"ioqIOQ"];
-                vin = [[vin componentsSeparatedByCharactersInSet: doNotWant] componentsJoinedByString: @""];
-                
-                //Cut length of VIN down to 17 characters. In testing some barcodes added an 18th character to the result that was invalid, but the rest of the VIN was correct.
-                vin = [vin substringToIndex: MIN(17, [vin length])];
-                
-                //If VIN is valid (check digit is correct) then cleanup the session and send results to Cordova.
-                if([self validateVin:vin] == true) {
-                    [ self cleanupCaptureSession];
-                    [_session stopRunning];
-                    [delegate sendResult:vin];
-                    break;
-                }
-            } else {
-                //Cleanup the session and send results to Cordova.
-                [ self cleanupCaptureSession];
-                [_session stopRunning];
-                [delegate sendResult:barcode.rawValue];
-                break;
-            }
+    if (@available(iOS 15.4, *)) {
+        if ((mask & GMVCodabar) && [available containsObject:AVMetadataObjectTypeCodabarCode]) [types addObject:AVMetadataObjectTypeCodabarCode];
+    }
+    return types;
+}
+
+// All capture configuration/start/stop operations run on one background queue.
+- (BOOL)configureCapture {
+    if (self.configured) return YES;
+    [self.session beginConfiguration];
+    self.session.sessionPreset = AVCaptureSessionPresetHigh;
+    self.camera = [AVCaptureDevice defaultDeviceWithDeviceType:AVCaptureDeviceTypeBuiltInWideAngleCamera mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionBack];
+    if (!self.camera) self.camera = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    NSError *error = nil;
+    AVCaptureDeviceInput *input = self.camera ? [AVCaptureDeviceInput deviceInputWithDevice:self.camera error:&error] : nil;
+    if (!input || ![self.session canAddInput:input]) {
+        [self.session commitConfiguration];
+        [self failWithMessage:@"CAMERA_UNAVAILABLE"];
+        return NO;
+    }
+    [self.session addInput:input];
+    if (![self.session canAddOutput:self.metadataOutput]) {
+        [self.session commitConfiguration];
+        [self failWithMessage:@"CAMERA_OUTPUT_UNAVAILABLE"];
+        return NO;
+    }
+    [self.session addOutput:self.metadataOutput];
+    [self.metadataOutput setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
+    NSArray<AVMetadataObjectType> *types = [self requestedTypes];
+    if (!types.count) {
+        [self.session commitConfiguration];
+        [self failWithMessage:@"NO_SUPPORTED_BARCODE_FORMATS"];
+        return NO;
+    }
+    self.metadataOutput.metadataObjectTypes = types;
+    [self.session commitConfiguration];
+    self.configured = YES;
+    if ([self.camera lockForConfiguration:nil]) {
+        if ([self.camera isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) self.camera.focusMode = AVCaptureFocusModeContinuousAutoFocus;
+        if (self.flashOn && self.camera.hasTorch && [self.camera isTorchModeSupported:AVCaptureTorchModeOn]) self.camera.torchMode = AVCaptureTorchModeOn;
+        [self.camera unlockForConfiguration];
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.torchButton.enabled = self.camera.hasTorch;
+        [self updateScanArea];
+    });
+    return YES;
+}
+
+- (void)startCapture {
+    if (!self.active || self.suspended || self.completed) return;
+    AVAuthorizationStatus authorization = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    if (authorization == AVAuthorizationStatusNotDetermined) {
+        __weak CameraViewController *weakSelf = self;
+        [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!weakSelf.active || weakSelf.completed) return;
+                if (granted) [weakSelf startCapture];
+                else [weakSelf failWithMessage:@"CAMERA_ACCESS_DENIED"];
+            });
+        }];
+        return;
+    }
+    if (authorization != AVAuthorizationStatusAuthorized) {
+        [self failWithMessage:@"CAMERA_ACCESS_DENIED"];
+        return;
+    }
+    dispatch_async(self.sessionQueue, ^{
+        if (!self.active || self.suspended || self.completed || ![self configureCapture]) return;
+        if (self.active && !self.suspended && !self.completed && !self.session.running) [self.session startRunning];
+    });
+}
+
+- (void)stopCapture {
+    dispatch_async(self.sessionQueue, ^{
+        if (self.session.running) [self.session stopRunning];
+        if (self.camera.hasTorch && [self.camera lockForConfiguration:nil]) {
+            self.camera.torchMode = AVCaptureTorchModeOff;
+            [self.camera unlockForConfiguration];
         }
     });
 }
 
-
-#pragma mark - VIN Validator
-
-- (int)transliterate:(NSString *) c {
-    NSString *values = @"0123456789.ABCDEFGH..JKLMN.P.R..STUVWXYZ";
-    NSRange range = [values rangeOfString:c];
-    
-    return (int)range.location % 10;
-}
-- (NSString *)getCheckDigit:(NSString *) vin {
-    NSString *map = @"0123456789X";
-    NSString *weights = @"8765432X098765432";
-    NSInteger *sum = 0;
-    for (int i = 0; i < 17; i++)
-    {
-        NSString * weight = [weights substringWithRange:NSMakeRange(i, 1)];
-        NSRange mapIndex = [map rangeOfString:weight];
-        NSString * vinChar = [vin substringWithRange:NSMakeRange(i, 1)];
-        NSInteger transliteration = [self transliterate:vinChar];
-        
-        sum = ((long)sum)+((long)transliteration * (unsigned long)mapIndex.location);
-    }
-    NSInteger checkIndex = ((int)sum) % 11;
-    NSString * checkDigit = [map substringWithRange:NSMakeRange(checkIndex, 1)];
-    return checkDigit;
+- (void)enteredBackground:(NSNotification *)notification {
+    self.suspended = YES;
+    [self stopCapture];
 }
 
-- (Boolean)validateVin:(NSString *) vin {
-    vin = [vin substringToIndex: MIN(17, [vin length])];
-    if([vin length] != 17) {
-        return false;
-    }
-    
-    NSString *checkDigit = [vin substringWithRange:NSMakeRange(8, 1)];
-    NSString *correctCheckDigit = [self getCheckDigit:vin];
-    NSLog(@"VIN check digit is %@ and correct check digit is %@.", checkDigit, correctCheckDigit);
-    return checkDigit == correctCheckDigit;
+- (void)becameActive:(NSNotification *)notification {
+    self.suspended = NO;
+    [self startCapture];
 }
 
+- (void)captureFailed:(NSNotification *)notification { [self failWithMessage:@"CAMERA_RUNTIME_ERROR"]; }
 
-#pragma mark - Camera setup
-
-- (void)cleanupVideoProcessing {
-    if (self.videoDataOutput) {
-        [self.session removeOutput:self.videoDataOutput];
-    }
-    self.videoDataOutput = nil;
+- (void)failWithMessage:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.completed) return;
+        self.completed = YES;
+        self.active = NO;
+        [self stopCapture];
+        [self.delegate sendError:message];
+    });
 }
 
-- (void)cleanupCaptureSession {
-    [self.session stopRunning];
-    [self cleanupVideoProcessing];
-    self.session = nil;
-    [self.previewLayer removeFromSuperlayer];
+- (void)cancelScan {
+    if (self.completed) return;
+    self.completed = YES;
+    self.active = NO;
+    [self stopCapture];
+    [self.delegate closeScanner];
 }
 
-- (void)setUpVideoProcessing {
-    self.videoDataOutput = [[AVCaptureVideoDataOutput alloc] init];
-    NSDictionary *rgbOutputSettings = @{
-                                        (__bridge NSString*)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA)
-                                        };
-    [self.videoDataOutput setVideoSettings:rgbOutputSettings];
-    
-    if (![self.session canAddOutput:self.videoDataOutput]) {
-        [self cleanupVideoProcessing];
-        NSLog(@"Failed to setup video output");
-        return;
-    }
-    [self.videoDataOutput setAlwaysDiscardsLateVideoFrames:YES];
-    [self.videoDataOutput setSampleBufferDelegate:self queue:self.videoDataOutputQueue];
-    [self.session addOutput:self.videoDataOutput];
+- (void)toggleTorch {
+    if (!self.active || self.completed) return;
+    dispatch_async(self.sessionQueue, ^{
+        if (!self.active || self.completed || !self.camera.hasTorch || ![self.camera lockForConfiguration:nil]) return;
+        AVCaptureTorchMode mode = self.camera.torchMode == AVCaptureTorchModeOn ? AVCaptureTorchModeOff : AVCaptureTorchModeOn;
+        if ([self.camera isTorchModeSupported:mode]) self.camera.torchMode = mode;
+        [self.camera unlockForConfiguration];
+    });
 }
 
-- (void)setUpCameraPreview {
-    self.previewLayer = [[AVCaptureVideoPreviewLayer alloc] initWithSession:self.session];
-    [self.previewLayer setBackgroundColor:[UIColor blackColor].CGColor];
-    [self.previewLayer setVideoGravity:AVLayerVideoGravityResizeAspectFill];
-    
-    self.previewLayer.frame = self.view.superview.bounds;
-    [self.view.layer addSublayer:self.previewLayer];
-    
-    CGRect screenRect = [[UIScreen mainScreen] bounds];
-    CGFloat screenWidth = screenRect.size.width;
-    CGFloat screenHeight = screenRect.size.height;
-    
-    CGFloat frameWidth = screenWidth*_scanAreaWidth;
-    CGFloat frameHeight = screenHeight*_scanAreaHeight;
-    
-    UILabel* _label1 = [[UILabel alloc] init];
-    _label1.frame = CGRectMake(screenWidth/2 - frameWidth/2, screenHeight/2 - frameHeight/2, frameWidth, frameHeight);
-    _label1.layer.masksToBounds = NO;
-    _label1.layer.cornerRadius = 30;
-    _label1.userInteractionEnabled = YES;
-    _label1.layer.borderColor = [UIColor whiteColor].CGColor;
-    _label1.layer.borderWidth = 3.0;
-    UITapGestureRecognizer* tapScanner = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(focusAtPoint:)];
-    [_label1 addGestureRecognizer:tapScanner];
-    
-    CGFloat buttonSize = 45.0;
-    
-    
-    UIButton *_cancelButton = [[UIButton alloc] init];
-    [_cancelButton addTarget:self
-                      action:@selector(closeView:)
-            forControlEvents:UIControlEventTouchUpInside];
-    
-    NSString * cancelBase64String = @"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAQAAABpN6lAAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAAmJLR0QAAKqNIzIAAAAJcEhZcwAADdcAAA3XAUIom3gAAAAHdElNRQfhCxMVEyaNvw4TAAADNElEQVR42u2dv1LqQBSHv1DwBjY0FjyAA7wCtna2ttrwLr6GY4PWKfQBJGNtb2PDMFQ2ewvmDheBC0l295zjYVO6Cb/vC4b82c0p+Lf1GDNkwAVfzKh4oyRguxWMGTFgyBnvVMwo+dzd8Y4F4cfyQl+aoFXr87LFtOCW4mfHc8qtjqtlyWS7u4lWMGG5h6rkfBN/vqfjapnSlaap3bpM/8s0Xyso9u799fJkTEGXp4NM5d9v9t3BrtYUHIMfCNwC9HYc+mwrOBY/sKAHN0d2tqLgePxA4Abua3TXr6AefuAeXmutoFtBXfzAKwd+AC0pqI8fmMNH7ZV0KmiCH/iAhwar6VPQDD/w0KFq9IFXPCpS0OWRq0ZrVnDZyJymb0HTvR8IXEKx43rJkoI2+C+rk+H+3msm/Qra4C/Xl/qTxhuRVdAGPzBZb6g4cOmoU0E7/OnmXY52G5NQED2xLQVJ0tpRkCypDQVJU+pXkDyhbgVZ0ulVkC2ZTgVZU+lTkD2RLgUiafQoEEuiQ4FoCnkF4glkA4jjy4ZQgS8XRA2+TBhV+PkDqcPPG0olfr5gavHzhFONnz6gevy0IU3gpwtqBj9NWFP48QObw48b2iR+vOBm8eOEN40fQ4Fx/PYKzONLKVCEL6FAGX5uBQrxcypQip9LgWL8HAqU46dWYAA/pQIj+KkUGMJPocAYfmwFBvFjKjCKH0uBYfwYCpLjd6QN/e7m/F/A+UHQ+c+g8xMh56fCzi+GnF8OO78h4vyWmPObos5vizt/MOL80Zjzh6POH487HyDhfIiM80FSzofJOR8o6XyorPPB0s6HyzufMOF8yozzSVPOp805nzjpfOqs88nTzqfPiwfw/v4I0RQ68MWS6MEXSaMLP3siffhZU+nEz5ZML36WdLrxkyfUj580pQ38ZEnt4CdJaws/emL3r9Z2/nJ156/Xd19gwXmJjQ6jhh/7zDXf0uwAfHPNc8N1R+7L7JwKLZ1KbTkvtla30pSeQ9+uVv9wWJ0KLp5Kbrovunoqu4v7wssrBa5Lb6+6uyy+vrlve4wZMuCCL2ZUvFESpBlatoIxIwYMOeOdihkln+s//wFFdoCM42fEswAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAxNy0xMS0xOVQyMToxOTozOCswMTowMPNH2M8AAAAldEVYdGRhdGU6bW9kaWZ5ADIwMTctMTEtMTlUMjE6MTk6MzgrMDE6MDCCGmBzAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAABJRU5ErkJggg==";
-    
-    NSURL *cancelImageUrl = [NSURL URLWithString:cancelBase64String];
-    NSData *cancelImageData = [NSData dataWithContentsOfURL:cancelImageUrl];
-    UIImage *cancelIcon = [UIImage imageWithData:cancelImageData];
-    [_cancelButton setImage:cancelIcon
-                   forState:UIControlStateNormal];
-    
-    CGFloat screenOffset = (screenWidth/2 - frameWidth/2)/2 - buttonSize/2;
-    NSLog(@"screenOffset %f", screenOffset);
-    
-    _cancelButton.frame = CGRectMake(screenOffset, screenHeight-screenOffset-buttonSize, buttonSize, buttonSize);
-    _cancelButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.4];
-    _cancelButton.transform=CGAffineTransformMakeRotation(M_PI / 2);
-    _cancelButton.layer.cornerRadius = buttonSize/2;
-    _cancelButton.contentEdgeInsets = UIEdgeInsetsMake(15, 15, 15, 15);
-    
-    [self.view addSubview:_cancelButton];
-    
-    
-    
-    
-    self.torchButton = [[UIButton alloc] init];
-    [self.torchButton addTarget:self
-                         action:@selector(toggleFlashlight:)
-               forControlEvents:UIControlEventTouchUpInside];
-    
-    NSString * torchBase64String = @"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAQAAABpN6lAAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAAmJLR0QAAKqNIzIAAAAJcEhZcwAADdcAAA3XAUIom3gAAAAHdElNRQfhCxMVAzOqoPipAAADM0lEQVR42u2dv2sTcRyG38RWzGYHhxYHp+B+Lk7iIlhFXZvdPeAouOuS1X/AVCiiCBU6OjgIOffG+gvEgCIqlsQi9JxEbC/XJt8fz136eTJecve+T+6Su8t9czX5oqmWEiVa9DbHfAZKlaqrfuDlTERNbQ2VRXwM1VaNrv2v/nrU8n8f62VR0EbqZ8rUpqtLUjPyyv//htB0jV93FrCiBia/oRYv4BxWX5IS1xm4f4x8Cv7FV8RAS7SADKzvoYH7JlBxTAAdgMYE0AFoTAAdwDAMwzAMo7q8ws4IZsr0wjW++57gFqrfeenuAt6YAJLXvADbBFABJVgDPmobrP+DF5BpAxPwyH0WPk6IPKmyAB8/MJ/UZ80D9T/ojPtMfKwB3/UcqO/l/fd1TvAxIuAhstRclrQT/ShgzU/0Y17m8lMLOh9V+UjX3L8CfbKgr1Hf/zt04f3EvFLorU7QdfdzXFuR6v/SRbpsPjci1b9MFx3P7eD1d3SFLlnM3cD1r9IFD+Z+wJW/AvWluh4EqT/UJbraYZnTmvf627pA12IV3KQrTa7gqcf6z+g603BKXzzV/+Z6NSjFiicB9+gi07PhRcBZusb0XPdQ3/nXP5J5D58Dt8JGDHuZ3G8Pp60C//AS+jrBl85zeBc24FxgAe/HTulrVT2lkhIlao0d/RNYQGhO527Xu+rsGWnUUEe7uc+tOPXc+su5z13OVVB59lfqjH1u5ygI2CwYZtfQZmwB8a8WX9Vo7LSRurHjxBfQK5yaRs8TnL2rdPEow8XZ3wRKRnwBicPUmRBQPNY4uoDwlPxrML6AI78jZLvC5ToYCv83JOMqHPZwOHBCTkBJEtqOEB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgTQAWhMAB2AxgQEX8IAfHUpBLgNhg0+lDa8gJ7Tq2dgLLHLbXk93Fa3DEz/d6ttOrofpr01d2lure1DwaQ3Z492c/V4jptqKVFy4F2KB0qVqqt+nFh/ADjJgLiaxweIAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDE3LTExLTE5VDIxOjAzOjUxKzAxOjAwdhzbkgAAACV0RVh0ZGF0ZTptb2RpZnkAMjAxNy0xMS0xOVQyMTowMzo1MSswMTowMAdBYy4AAAAZdEVYdFNvZnR3YXJlAHd3dy5pbmtzY2FwZS5vcmeb7jwaAAAAAElFTkSuQmCCconv";
-    
-    NSURL *torchImageUrl = [NSURL URLWithString:torchBase64String];
-    NSData *torchImageData = [NSData dataWithContentsOfURL:torchImageUrl];
-    UIImage *torchIcon = [UIImage imageWithData:torchImageData];
-    [self.torchButton setImage:torchIcon
-                      forState:UIControlStateNormal];
-    
-    self.torchButton.frame = CGRectMake(screenWidth-screenOffset-buttonSize, screenHeight-screenOffset-buttonSize, buttonSize, buttonSize);
-    self.torchButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.4];
-    self.torchButton.transform=CGAffineTransformMakeRotation(M_PI / 2);
-    self.torchButton.layer.cornerRadius = buttonSize/2;
-    self.torchButton.contentEdgeInsets = UIEdgeInsetsMake(10, 10, 10, 10);
-    
-    [self.view addSubview:self.torchButton];
-    
-    [self.view addSubview:_label1];
-    
-    self.imageView = [[UIImageView alloc] initWithImage:nil];
-    
-    UIView *catView = [[UIView alloc] initWithFrame:CGRectMake(0,0,frameWidth,frameHeight)];
-    self.imageView.frame = catView.bounds;
-    
-    // add the imageview to the superview
-    [catView addSubview:self.imageView];
-    
-    //add the view to the main view
-    
-    [self.view addSubview:catView];
-    
-}
-
-#pragma mark - Helper Functions
-
-- (void)focusAtPoint:(id) sender{
-    NSLog(@"captured touch");
-    CGPoint touchPoint = [(UITapGestureRecognizer*)sender locationInView:self.view];
-    double focus_x = touchPoint.x/self.previewLayer.frame.size.width;
-    double focus_y = (touchPoint.y+66)/self.previewLayer.frame.size.height;
-    
-    NSError *error;
-    NSArray *devices = [AVCaptureDevice devices];
-    for (AVCaptureDevice *device in devices){
-        NSLog(@"Device name: %@", [device localizedName]);
-        if ([device hasMediaType:AVMediaTypeVideo]) {
-            if ([device position] == AVCaptureDevicePositionBack) {
-                NSLog(@"Device position : back");
-                CGPoint point = CGPointMake(focus_y, 1-focus_x);
-                if ([device isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus] && [device lockForConfiguration:&error]){
-                    [device setFocusPointOfInterest:point];
-                    
-                    for (UIView *subView in self.view.subviews)
-                    {
-                        if (subView.tag == 99)
-                        {
-                            [subView removeFromSuperview];
-                        }
-                    }
-                    
-                    CGRect rect = CGRectMake(touchPoint.x-30, touchPoint.y-30, 60, 60);
-                    UIView *focusRect = [[UIView alloc] initWithFrame:rect];
-                    focusRect.layer.borderColor = [UIColor colorWithRed:0.98 green:0.80 blue:0.18 alpha:.7].CGColor;
-                    focusRect.layer.borderWidth = 1;
-                    focusRect.tag = 99;
-                    [self.view addSubview:focusRect];
-                    
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                        [focusRect removeFromSuperview];
-                    });
-                    
-                    [device setFocusMode:AVCaptureFocusModeAutoFocus];
-                    [device unlockForConfiguration];
-                }
-            }
+- (void)focusAtPoint:(UITapGestureRecognizer *)gesture {
+    CGPoint point = [self.previewLayer captureDevicePointOfInterestForPoint:[gesture locationInView:self.view]];
+    dispatch_async(self.sessionQueue, ^{
+        if (!self.active || self.completed || ![self.camera lockForConfiguration:nil]) return;
+        if (self.camera.isFocusPointOfInterestSupported && [self.camera isFocusModeSupported:AVCaptureFocusModeAutoFocus]) {
+            self.camera.focusPointOfInterest = point;
+            self.camera.focusMode = AVCaptureFocusModeAutoFocus;
         }
-    }
-}
-static inline double radians (double degrees) {return degrees * M_PI/180;}
-- (UIImage*) rotateImage:(UIImage*)src toOrientation:(UIImageOrientation) orientation
-{
-    UIGraphicsBeginImageContext(src.size);
-    
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    
-    if (orientation == UIImageOrientationRight) {
-        CGContextRotateCTM (context, radians(90));
-    } else if (orientation == UIImageOrientationLeft) {
-        CGContextRotateCTM (context, radians(-90));
-    } else if (orientation == UIImageOrientationDown) {
-        // NOTHING
-    } else if (orientation == UIImageOrientationUp) {
-        CGContextRotateCTM (context, radians(90));
-    }
-    
-    [src drawAtPoint:CGPointMake(0, 0)];
-    
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
+        [self.camera unlockForConfiguration];
+    });
 }
 
-- (UIImage *)croppIngimageByImageName:(UIImage *)imageToCrop toRect:(CGRect)rect
-{
-    //CGRect CropRect = CGRectMake(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height+15);
-    
-    CGImageRef imageRef = CGImageCreateWithImageInRect([imageToCrop CGImage], rect);
-    UIImage *cropped = [UIImage imageWithCGImage:imageRef];
-    CGImageRelease(imageRef);
-    
-    return cropped;
-}
-
-- (void) toggleFlashlight:(id)sender
-{
-    // check if flashlight available
-    Class captureDeviceClass = NSClassFromString(@"AVCaptureDevice");
-    if (captureDeviceClass != nil) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch] && [device hasFlash]){
-            
-            [device lockForConfiguration:nil];
-            if (device.torchMode == AVCaptureTorchModeOff)
-            {
-                self.torchButton.backgroundColor = [UIColor colorWithWhite:1 alpha:1];
-                [device setTorchMode:AVCaptureTorchModeOn];
-                [device setFlashMode:AVCaptureFlashModeOn];
-                //torchIsOn = YES;
-            }
-            else
-            {
-                self.torchButton.backgroundColor = [UIColor colorWithWhite:1 alpha:.4];
-                [device setTorchMode:AVCaptureTorchModeOff];
-                [device setFlashMode:AVCaptureFlashModeOff];
-                // torchIsOn = NO;
-            }
-            [device unlockForConfiguration];
+- (void)metadataOutput:(AVCaptureMetadataOutput *)output didOutputMetadataObjects:(NSArray<__kindof AVMetadataObject *> *)objects fromConnection:(AVCaptureConnection *)connection {
+    if (!self.active || self.suspended || self.completed) return;
+    for (AVMetadataObject *object in objects) {
+        if (![object isKindOfClass:AVMetadataMachineReadableCodeObject.class]) continue;
+        AVMetadataMachineReadableCodeObject *barcode = (AVMetadataMachineReadableCodeObject *)object;
+        NSString *value = barcode.stringValue;
+        if (!value.length) continue;
+        if (self.barcodeFormats && self.barcodeFormats.unsignedLongValue == 0) {
+            char vin[18];
+            if (!GMVNormalizeVIN(value.UTF8String, vin)) continue;
+            value = [NSString stringWithUTF8String:vin];
+        } else if ([barcode.type isEqualToString:AVMetadataObjectTypeEAN13Code]) {
+            unsigned long mask = GMVEffectiveFormats(self.barcodeFormats ? self.barcodeFormats.unsignedLongValue : 1234);
+            BOOL isUPCA = value.length == 13 && [value hasPrefix:@"0"];
+            if (!(mask & GMVEAN13) && !isUPCA) continue;
+            if ((mask & GMVUPCA) && isUPCA) value = [value substringFromIndex:1];
         }
-    } }
-
-- (void) closeView :(id)sender{
-    
-    [ self cleanupCaptureSession];
-    
-    [_session stopRunning];
-    
-    [delegate closeScanner];
-}
-
-
-- (void)updateCameraSelection {
-    [self.session beginConfiguration];
-    
-    // Remove old inputs
-    NSArray *oldInputs = [self.session inputs];
-    for (AVCaptureInput *oldInput in oldInputs) {
-        [self.session removeInput:oldInput];
+        self.completed = YES;
+        self.active = NO;
+        [self stopCapture];
+        [self.delegate sendResult:value];
+        break;
     }
-    
-    AVCaptureDevicePosition desiredPosition = AVCaptureDevicePositionBack;
-    AVCaptureDeviceInput *input = [self captureDeviceInputForPosition:desiredPosition];
-    if (!input) {
-        // Failed, restore old inputs
-        for (AVCaptureInput *oldInput in oldInputs) {
-            [self.session addInput:oldInput];
-        }
-    } else {
-        // Succeeded, set input and update connection states
-        [self.session addInput:input];
-    }
-    [self.session commitConfiguration];
 }
-
-- (AVCaptureDeviceInput *)captureDeviceInputForPosition:(AVCaptureDevicePosition)desiredPosition {
-    for (AVCaptureDevice *device in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
-        if (device.position == desiredPosition) {
-            NSError *error = nil;
-            AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:device
-                                                                                error:&error];
-            if (error) {
-                NSLog(@"Could not initialize for AVMediaTypeVideo for device %@", device);
-            } else if ([self.session canAddInput:input]) {
-                return input;
-            }
-        }
-    }
-    return nil;
-}
-
-
 
 @end
-
-
