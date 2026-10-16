@@ -1,132 +1,69 @@
-//
-//  CDViOSScanner.m
-//  Dealr, Inc.
-//
-
-//#import <AVFoundation/AVFoundation.h>
 #import "CDViOSScanner.h"
 
-@class UIViewController;
-
 @interface CDViOSScanner ()
-{
-    NSInteger _previousStatusBarStyle;
-}
+@property(nonatomic, copy) NSString *callback;
+@property(nonatomic) BOOL scannerOpen;
+@property(nonatomic) BOOL finishing;
+@property(nonatomic) NSUInteger scanGeneration;
 @end
-
 
 @implementation CDViOSScanner
 
-/*-(CDVPlugin*) initWithWebView:(UIWebView*)theWebView
- {
- self = (CDViOSScanner*)[super initWithWebView:theWebView];
- return self;
- }*/
-
-- (void)pluginInitialize
-{
-    _previousStatusBarStyle = -1;
-}
-
-
-- (void) startScan:(CDVInvokedUrlCommand *)command
-{
-    //Force portrait orientation.
-    [[UIDevice currentDevice] setValue:
-     [NSNumber numberWithInteger: UIInterfaceOrientationPortrait]
-                                forKey:@"orientation"];
+- (void)startScan:(CDVInvokedUrlCommand *)command {
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSLog(@"Arguments %@", command.arguments);
-        if(_scannerOpen == YES) {
-            //Scanner is currently open, throw error.
-            NSArray *response = @[@"SCANNER_OPEN", @"", @""];
-            CDVPluginResult *pluginResult=[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsArray:response];
-            
-            [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-        } else {
-            //Open scanner.
-            _scannerOpen = YES;
-            self.cameraViewController = [[CameraViewController alloc] init];
-            
-            self.cameraViewController.delegate = self;
-            
-            //Provide settings to the camera view.
-            NSNumberFormatter *f = [[NSNumberFormatter alloc] init];
-            f.numberStyle = NSNumberFormatterDecimalStyle;
-            NSNumber * barcodeFormats = [command argumentAtIndex:0 withDefault:@1234];
-            self.cameraViewController.scanAreaWidth = (CGFloat)[[command argumentAtIndex:1 withDefault:@.5] floatValue];
-            self.cameraViewController.scanAreaHeight = (CGFloat)[[command argumentAtIndex:2 withDefault:@.7] floatValue];
-            self.cameraViewController.barcodeFormats = barcodeFormats;
-            self.cameraViewController.modalPresentationStyle = UIModalPresentationFullScreen;
-
-            NSLog(@"Test %@, width: %f, height: %f, barcodeFormats: %@",[command.arguments objectAtIndex:2], self.cameraViewController.scanAreaWidth, self.cameraViewController.scanAreaHeight, self.cameraViewController.barcodeFormats);
-            
-            [self.viewController presentViewController:self.cameraViewController animated: NO completion:nil];
-            _callback = command.callbackId;
+        if (self.scannerOpen) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsArray:@[@"SCANNER_OPEN", @"", @""]];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
         }
+        self.scannerOpen = YES;
+        self.finishing = NO;
+        ++self.scanGeneration;
+        self.callback = command.callbackId;
+        CameraViewController *scanner = [[CameraViewController alloc] init];
+        scanner.delegate = self;
+        scanner.barcodeFormats = [command argumentAtIndex:0 withDefault:@1234];
+        scanner.scanAreaWidth = [[command argumentAtIndex:1 withDefault:@0.5] doubleValue];
+        scanner.scanAreaHeight = [[command argumentAtIndex:2 withDefault:@0.7] doubleValue];
+        scanner.flashOn = [[command argumentAtIndex:4 withDefault:@NO] boolValue];
+        scanner.modalPresentationStyle = UIModalPresentationFullScreen;
+        self.cameraViewController = scanner;
+        [self.viewController presentViewController:scanner animated:NO completion:nil];
     });
-    
 }
 
--(void)sendResult:(NSString *)value
-{
-    [self.cameraViewController dismissViewControllerAnimated:NO completion:nil];
-    _scannerOpen = NO;
-    
-    NSArray *response = @[value, @"", @""];
-    CDVPluginResult *pluginResult=[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:response];
-    
-    [self.commandDelegate sendPluginResult:pluginResult callbackId:_callback];
+- (void)finishWithValue:(NSString *)value status:(CDVCommandStatus)status {
+    if (!self.scannerOpen || self.finishing) return;
+    self.finishing = YES;
+    NSString *callback = self.callback;
+    NSUInteger generation = self.scanGeneration;
+    [self.cameraViewController dismissViewControllerAnimated:NO completion:^{
+        if (generation != self.scanGeneration) return;
+        self.scannerOpen = NO;
+        self.finishing = NO;
+        self.callback = nil;
+        self.cameraViewController = nil;
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:status messageAsArray:@[value, @"", @""]];
+        [self.commandDelegate sendPluginResult:result callbackId:callback];
+    }];
 }
 
--(void)closeScanner
-{
-    [self.cameraViewController dismissViewControllerAnimated:NO completion:nil];
-    _scannerOpen = NO;
-    
-    NSArray *response = @[@"USER_CANCELLED", @"", @""];
-    CDVPluginResult *pluginResult=[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsArray:response];
-    
-    [self.commandDelegate sendPluginResult:pluginResult callbackId:_callback];
-    
-}
+- (void)sendResult:(NSString *)value { [self finishWithValue:value status:CDVCommandStatus_OK]; }
+- (void)closeScanner { [self finishWithValue:@"USER_CANCELLED" status:CDVCommandStatus_ERROR]; }
+- (void)sendError:(NSString *)error { [self finishWithValue:error status:CDVCommandStatus_ERROR]; }
 
-
-- (void)show:(CDVInvokedUrlCommand*)command
-{
-    if (self.cameraViewController == nil) {
-        NSLog(@"Tried to show scanner after it was closed.");
-        return;
-    }
-    if (_previousStatusBarStyle != -1) {
-        NSLog(@"Tried to show scanner while already shown");
-        return;
-    }
-    
-    _previousStatusBarStyle = [UIApplication sharedApplication].statusBarStyle;
-    
-    __block UINavigationController* nav = [[UINavigationController alloc]
-                                           initWithRootViewController:self.cameraViewController];
-    //nav.orientationDelegate = self.cameraViewController;
-    nav.navigationBarHidden = YES;
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    
-    __weak CDViOSScanner* weakSelf = self;
-    
-    // Run later to avoid the "took a long time" log message.
+- (void)onReset {
+    // A CodePush/web-view reload must not leave the camera running or send a
+    // result to a callback belonging to the previous JavaScript session.
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (weakSelf.cameraViewController != nil) {
-            CGRect frame = [[UIScreen mainScreen] bounds];
-            UIWindow *tmpWindow = [[UIWindow alloc] initWithFrame:frame];
-            UIViewController *tmpController = [[UIViewController alloc] init];
-            [tmpWindow setRootViewController:tmpController];
-            [tmpWindow setWindowLevel:UIWindowLevelNormal];
-            
-            [tmpWindow makeKeyAndVisible];
-            [tmpController presentViewController:nav animated:NO completion:nil];
-        }
+        ++self.scanGeneration;
+        self.cameraViewController.delegate = nil;
+        [self.cameraViewController dismissViewControllerAnimated:NO completion:nil];
+        self.cameraViewController = nil;
+        self.callback = nil;
+        self.scannerOpen = NO;
+        self.finishing = NO;
     });
 }
 
 @end
-
