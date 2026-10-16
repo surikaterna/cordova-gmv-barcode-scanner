@@ -47,7 +47,11 @@
 
 - (UIButton *)buttonWithSymbol:(NSString *)symbol action:(SEL)action label:(NSString *)label {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
+    if (@available(iOS 13.0, *)) {
+        [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
+    } else {
+        [button setTitle:label forState:UIControlStateNormal];
+    }
     button.tintColor = UIColor.whiteColor;
     button.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.85];
     button.layer.cornerRadius = 24;
@@ -119,10 +123,12 @@
     self.scanFrame.frame = CGRectMake(CGRectGetMidX(bounds) - bounds.size.width * width / 2,
                                      CGRectGetMidY(bounds) - bounds.size.height * height / 2,
                                      bounds.size.width * width, bounds.size.height * height);
-    CGFloat bottom = bounds.size.height - self.view.safeAreaInsets.bottom - 68;
+    UIEdgeInsets safeArea = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) safeArea = self.view.safeAreaInsets;
+    CGFloat bottom = bounds.size.height - safeArea.bottom - 68;
     self.cancelButton.frame = CGRectMake(24, bottom, 48, 48);
     self.torchButton.frame = CGRectMake(bounds.size.width - 72, bottom, 48, 48);
-    self.instruction.frame = CGRectMake(20, MAX(self.view.safeAreaInsets.top + 8, self.scanFrame.frame.origin.y - 52), bounds.size.width - 40, 44);
+    self.instruction.frame = CGRectMake(20, MAX(safeArea.top + 8, self.scanFrame.frame.origin.y - 52), bounds.size.width - 40, 44);
     [self updateScanArea];
 }
 
@@ -172,7 +178,9 @@
     if (self.configured) return YES;
     [self.session beginConfiguration];
     self.session.sessionPreset = AVCaptureSessionPresetHigh;
-    self.camera = [AVCaptureDevice defaultDeviceWithDeviceType:AVCaptureDeviceTypeBuiltInWideAngleCamera mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionBack];
+    if (@available(iOS 10.0, *)) {
+        self.camera = [AVCaptureDevice defaultDeviceWithDeviceType:AVCaptureDeviceTypeBuiltInWideAngleCamera mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionBack];
+    }
     if (!self.camera) self.camera = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
     NSError *error = nil;
     AVCaptureDeviceInput *input = self.camera ? [AVCaptureDeviceInput deviceInputWithDevice:self.camera error:&error] : nil;
@@ -200,7 +208,6 @@
     self.configured = YES;
     if ([self.camera lockForConfiguration:nil]) {
         if ([self.camera isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) self.camera.focusMode = AVCaptureFocusModeContinuousAutoFocus;
-        if (self.flashOn && self.camera.hasTorch && [self.camera isTorchModeSupported:AVCaptureTorchModeOn]) self.camera.torchMode = AVCaptureTorchModeOn;
         [self.camera unlockForConfiguration];
     }
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -208,6 +215,16 @@
         [self updateScanArea];
     });
     return YES;
+}
+
+- (void)applyTorchPreference {
+    // Only called on sessionQueue. Stopping for background does not change
+    // flashOn, so a resumed session restores the user's last requested state.
+    if (!self.active || self.suspended || self.completed || !self.camera.hasTorch) return;
+    if (![self.camera lockForConfiguration:nil]) return;
+    AVCaptureTorchMode mode = self.flashOn ? AVCaptureTorchModeOn : AVCaptureTorchModeOff;
+    if ([self.camera isTorchModeSupported:mode]) self.camera.torchMode = mode;
+    [self.camera unlockForConfiguration];
 }
 
 - (void)startCapture {
@@ -231,6 +248,7 @@
     dispatch_async(self.sessionQueue, ^{
         if (!self.active || self.suspended || self.completed || ![self configureCapture]) return;
         if (self.active && !self.suspended && !self.completed && !self.session.running) [self.session startRunning];
+        [self applyTorchPreference];
     });
 }
 
@@ -277,9 +295,12 @@
 - (void)toggleTorch {
     if (!self.active || self.completed) return;
     dispatch_async(self.sessionQueue, ^{
-        if (!self.active || self.completed || !self.camera.hasTorch || ![self.camera lockForConfiguration:nil]) return;
+        if (!self.active || self.suspended || self.completed || !self.camera.hasTorch || ![self.camera lockForConfiguration:nil]) return;
         AVCaptureTorchMode mode = self.camera.torchMode == AVCaptureTorchModeOn ? AVCaptureTorchModeOff : AVCaptureTorchModeOn;
-        if ([self.camera isTorchModeSupported:mode]) self.camera.torchMode = mode;
+        if ([self.camera isTorchModeSupported:mode]) {
+            self.camera.torchMode = mode;
+            self.flashOn = mode == AVCaptureTorchModeOn;
+        }
         [self.camera unlockForConfiguration];
     });
 }

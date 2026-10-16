@@ -4,9 +4,11 @@ The iOS implementation now uses AVFoundation, without GoogleMobileVision pods.
 The existing JavaScript API, format masks, VIN validation, cancellation and
 single-result iOS behavior are retained. Android sources are unchanged.
 
-The backend uses iOS 13+ APIs. The Lynx application's iOS 16.0 deployment target
+Newer camera, safe-area and SF Symbol APIs are availability-guarded, with text
+buttons on pre-iOS 13 hosts. The Lynx application's iOS 16.0 deployment target
 does not need to increase. The host application must provide an appropriate
-`NSCameraUsageDescription` in its Info.plist.
+`NSCameraUsageDescription` in its Info.plist. Older-device behavior still needs
+device validation if an application targets those versions.
 
 Run the JavaScript and native C checks with Node.js 18 or newer:
 

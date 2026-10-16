@@ -84,6 +84,39 @@ int main(void) {
     assert.equal(spawnSync(executable).status, 0);
 });
 
+test("torch preference is reapplied after capture starts and tracks user toggles", () => {
+    const source = fs.readFileSync(path.join(ios, "CameraViewController.m"), "utf8");
+    function method(signature) {
+        const start = source.indexOf(signature);
+        assert.ok(start >= 0, signature);
+        const end = source.indexOf("\n- (", start + signature.length);
+        return source.slice(start, end < 0 ? undefined : end);
+    }
+    const start = method("- (void)startCapture");
+    const stop = method("- (void)stopCapture");
+    const toggle = method("- (void)toggleTorch");
+    const apply = method("- (void)applyTorchPreference");
+    const configure = method("- (BOOL)configureCapture");
+    assert.match(configure, /if \(self.configured\) return YES/);
+    assert.ok(start.indexOf("[self configureCapture]") < start.indexOf("[self applyTorchPreference]"));
+    assert.ok(start.indexOf("[self.session startRunning]") < start.indexOf("[self applyTorchPreference]"));
+    assert.match(apply, /self.flashOn \? AVCaptureTorchModeOn : AVCaptureTorchModeOff/);
+    assert.match(apply, /self.suspended/);
+    assert.match(stop, /self.camera.torchMode = AVCaptureTorchModeOff/);
+    assert.doesNotMatch(stop, /self.flashOn\s*=/);
+    assert.match(toggle, /self.flashOn = mode == AVCaptureTorchModeOn/);
+    assert.match(toggle, /self.suspended/);
+});
+
+test("camera UI availability checks compile for a pre-iOS 13 host", { skip: process.platform !== "darwin" }, t => {
+    const sdk = spawnSync("xcrun", ["--sdk", "iphoneos", "--show-sdk-path"], { encoding: "utf8" });
+    if (sdk.status !== 0) { t.skip("iPhoneOS SDK unavailable"); return; }
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), "gmv-availability-test-"));
+    t.after(() => fs.rmSync(cache, { recursive: true, force: true }));
+    const compile = spawnSync("xcrun", ["clang", "-fsyntax-only", "-fobjc-arc", "-fmodules", "-fblocks", "-Werror=unguarded-availability", "-Werror=unguarded-availability-new", "-target", "arm64-apple-ios9.0", "-isysroot", sdk.stdout.trim(), "-fmodules-cache-path=" + cache, path.join(ios, "CameraViewController.m")], { encoding: "utf8", timeout: 60000 });
+    assert.equal(compile.status, 0, compile.stderr || String(compile.error));
+});
+
 test("AVFoundation implementations compile for iOS 16 with Cordova headers", {
     skip: process.platform !== "darwin" || !process.env.CORDOVA_IOS_HEADERS
 }, t => {
